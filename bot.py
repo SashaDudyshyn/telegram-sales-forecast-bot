@@ -1,7 +1,8 @@
-# bot.py
+# bot.py ВЕРСІЯ ДЛЯ RENDER (Web Service)
 import asyncio
 import aiohttp
 import os
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import BufferedInputFile, FSInputFile, ReplyKeyboardRemove
@@ -10,7 +11,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 API_URL = "https://sales-analysis-forecasting-systems-api.onrender.com/process-excel/"
-BOT_TOKEN = "8557679270:AAHcGdCX2v7kd8xanqQhI1Jvnq6bdv0JzWE"
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
@@ -30,19 +31,12 @@ class Form(StatesGroup):
     sheet_factor = State()
 
 
-# Шлях до шаблону (має лежати в корені проекту)
 TEMPLATE_PATH = "шаблон.xlsx"
 
 
 def back_cancel_kb():
-    keyboard = [
-        [types.KeyboardButton(text="Назад"), types.KeyboardButton(text="Скасувати")]
-    ]
-    return types.ReplyKeyboardMarkup(
-        keyboard=keyboard,
-        resize_keyboard=True,
-        one_time_keyboard=False
-    )
+    keyboard = [[types.KeyboardButton(text="Назад"), types.KeyboardButton(text="Скасувати")]]
+    return types.ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 
 @dp.message(Command("start"))
@@ -264,10 +258,35 @@ async def final_step(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Готовий до нового файлу! Надішли ще один або /start")
 
+# ===  ЕНДПОІНТ ДЛЯ RENDER ===
+async def health(request):
+    return web.Response(text="Bot is alive!")
 
-async def main():
-    print("Бот з шаблоном і формою запущено!")
+
+# === ОСНОВНА ФУНКЦІЯ ЗАПУСКУ БОТА ===
+async def start_bot():
+    print("Запускаю Telegram-бота...")
     await dp.start_polling(bot)
+
+
+# === ВЕБ-СЕРВЕР ДЛЯ RENDER ===
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get('PORT', 10000)))
+    await site.start()
+    print(f"Веб-сервер запущено на порту {os.environ.get('PORT', 10000)}")
+
+
+# === ГОЛОВНИЙ ЗАПУСК ===
+async def main():
+    # Запускаємо і бота, і веб-сервер одночасно
+    await asyncio.gather(
+        start_bot(),
+        start_web_server()
+    )
 
 
 if __name__ == "__main__":

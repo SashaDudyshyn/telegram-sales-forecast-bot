@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: sales-forecast-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      BOT_TOKEN:
+        value: 8557679270:AAHcGdCX2v7kd8xanqQhI1Jvnq6bdv0JzWE

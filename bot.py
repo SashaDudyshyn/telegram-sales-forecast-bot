@@ -1,7 +1,9 @@
 # bot.py ВЕРСІЯ ДЛЯ RENDER (Web Service)
+import re
 import asyncio
 import aiohttp
 import os
+import logging
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -10,8 +12,15 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
+# Налаштування логування (щоб бачити помилки в консолі Render)
+logging.basicConfig(level=logging.INFO)
+
 API_URL = "https://sales-analysis-forecasting-systems-api.onrender.com/process-excel/"
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+
+# Якщо токена немає, бот не запуститься
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN is not set in environment variables!")
 
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
@@ -41,20 +50,18 @@ def back_cancel_kb():
 
 @dp.message(Command("start"))
 async def start(message: types.Message, state: FSMContext):
-    # Перевіряємо, чи є шаблон
     if os.path.exists(TEMPLATE_PATH):
         await message.answer_document(
             FSInputFile(TEMPLATE_PATH),
             caption="Привіт! Я бот для прогнозу продажів\n\n"
-                    "Завантаж свій файл, який буди містити два аркуші: статистичні дані та фактори впливу,\n\n"
+                    "Завантаж свій файл, який буде містити два аркуші: статистичні дані та фактори впливу,\n\n"
                     "Або завантаж цей шаблон, заповни його своїми даними та поверни його мені\n\n"
                     "Після цього я зроблю повний аналіз та прогноз на наступний рік"
         )
     else:
         await message.answer(
             "Привіт! Я бот для прогнозу продажів\n\n"
-            "Надішли мені файл, який буди містити два аркуші: статистичні дані та фактори впливу (.xlsx) — і я зроблю прогноз\n\n"
-            "Шаблон для заповнення можна отримати у адміністратора"
+            "Надішли мені файл, який буде містити два аркуші: статистичні дані та фактори впливу (.xlsx) — і я зроблю прогноз\n\n"
         )
 
     await message.answer(
@@ -86,6 +93,7 @@ async def file_received(message: types.Message, state: FSMContext):
     )
     await state.set_state(Form.column_year)
 
+
 async def handle_back_or_cancel(message: types.Message, state: FSMContext):
     if message.text == "Скасувати":
         await state.clear()
@@ -101,7 +109,13 @@ async def set_year_col(message: types.Message, state: FSMContext):
         await message.answer("Надішли файл ще раз:", reply_markup=ReplyKeyboardRemove())
         await state.set_state(Form.waiting_file)
         return
-    await state.update_data(column_year=message.text.strip().upper())
+    
+    text = message.text.strip().upper()
+    if not re.match(r'^[A-Z]{1,5}$', text):
+        await message.answer("Помилка! Введи коректну букву колонки (наприклад: B або AA). Тільки англійські літери.")
+        return
+        
+    await state.update_data(column_year=text)
     await message.answer("Колонка з місяцями? (наприклад: D)", reply_markup=back_cancel_kb())
     await state.set_state(Form.column_month)
 
@@ -113,7 +127,13 @@ async def set_month_col(message: types.Message, state: FSMContext):
         await message.answer("Колонка з роками?", reply_markup=back_cancel_kb())
         await state.set_state(Form.column_year)
         return
-    await state.update_data(column_month=message.text.strip().upper())
+
+    text = message.text.strip().upper()
+    if not re.match(r'^[A-Z]{1,5}$', text):
+        await message.answer("Помилка! Введи коректну букву колонки (наприклад: D). Лише англійські літери.")
+        return
+
+    await state.update_data(column_month=text)
     await message.answer("Діапазон даних? (наприклад: G-J)", reply_markup=back_cancel_kb())
     await state.set_state(Form.range_data)
 
@@ -125,7 +145,13 @@ async def set_range(message: types.Message, state: FSMContext):
         await message.answer("Колонка з місяцями?", reply_markup=back_cancel_kb())
         await state.set_state(Form.column_month)
         return
-    await state.update_data(range_data=message.text.strip().upper())
+
+    text = message.text.strip().upper()
+    if not re.match(r'^[A-Z]{1,5}-[A-Z]{1,5}$', text):
+        await message.answer("Помилка формату! Введи діапазон у форматі БУКВА-БУКВА (наприклад: G-J). Без пробілів.")
+        return
+
+    await state.update_data(range_data=text)
     await message.answer("Рядок з назвами колонок? (наприклад: 3)", reply_markup=back_cancel_kb())
     await state.set_state(Form.row_title)
 
@@ -137,10 +163,13 @@ async def set_title_row(message: types.Message, state: FSMContext):
         await message.answer("Діапазон даних?", reply_markup=back_cancel_kb())
         await state.set_state(Form.range_data)
         return
-    if not message.text.isdigit():
-        await message.answer("Введи число")
+
+    text = message.text.strip()
+    if not text.isdigit():
+        await message.answer("Помилка! Введи одне ціле число")
         return
-    await state.update_data(row_title=int(message.text))
+
+    await state.update_data(row_title=int(text))
     await message.answer("Перший рядок з даними? (наприклад: 4)", reply_markup=back_cancel_kb())
     await state.set_state(Form.row_first_data)
 
@@ -152,10 +181,13 @@ async def set_first_row(message: types.Message, state: FSMContext):
         await message.answer("Рядок з назвами колонок?", reply_markup=back_cancel_kb())
         await state.set_state(Form.row_title)
         return
-    if not message.text.isdigit():
-        await message.answer("Введи число")
+
+    text = message.text.strip()
+    if not text.isdigit():
+        await message.answer("Помилка! Введи одне ціле число")
         return
-    await state.update_data(row_first_data=int(message.text))
+
+    await state.update_data(row_first_data=int(text))
     await message.answer("Останній рядок з даними? (наприклад: 38)", reply_markup=back_cancel_kb())
     await state.set_state(Form.row_last_data)
 
@@ -167,10 +199,13 @@ async def set_last_row(message: types.Message, state: FSMContext):
         await message.answer("Перший рядок з даними?", reply_markup=back_cancel_kb())
         await state.set_state(Form.row_first_data)
         return
-    if not message.text.isdigit():
-        await message.answer("Введи число")
+
+    text = message.text.strip()
+    if not text.isdigit():
+        await message.answer("Помилка! Введи одне ціле число")
         return
-    await state.update_data(row_last_data=int(message.text))
+
+    await state.update_data(row_last_data=int(text))
     await message.answer("Параметр згладжування k? (зазвичай 2)", reply_markup=back_cancel_kb())
     await state.set_state(Form.k_value)
 
@@ -182,10 +217,13 @@ async def set_k(message: types.Message, state: FSMContext):
         await message.answer("Останній рядок з даними?", reply_markup=back_cancel_kb())
         await state.set_state(Form.row_last_data)
         return
-    if not message.text.isdigit():
-        await message.answer("Введи число")
+
+    text = message.text.strip()
+    if not text.isdigit():
+        await message.answer("Помилка! Введи одне ціле число")
         return
-    await state.update_data(k=int(message.text))
+
+    await state.update_data(k=int(text))
     await message.answer("Назва аркуша зі статистикою? (наприклад: Статистичні дані)", reply_markup=back_cancel_kb())
     await state.set_state(Form.sheet_stat)
 
@@ -197,6 +235,7 @@ async def set_sheet_stat(message: types.Message, state: FSMContext):
         await message.answer("Параметр k?", reply_markup=back_cancel_kb())
         await state.set_state(Form.k_value)
         return
+
     await state.update_data(sheet_stat=message.text.strip())
     await message.answer("Назва аркуша з факторами? (наприклад: Фактори впливу)", reply_markup=back_cancel_kb())
     await state.set_state(Form.sheet_factor)
@@ -249,14 +288,30 @@ async def final_step(message: types.Message, state: FSMContext):
                         BufferedInputFile(result, filename=f"Прогноз_{filename}"),
                         caption="Готово! Ось твій файл з повним аналізом та прогнозом"
                     )
+                    await message.answer("Щоб завантажити новий файл, натисни /start")
                 else:
-                    error = await resp.text()
-                    await status_msg.edit_text(f"Помилка сервера: {resp.status}\n{error[:800]}")
+                    # ТУТ ВАЖЛИВА ЗМІНА: Зрозуміле повідомлення про помилку
+                    error_text = await resp.text()
+                    logging.error(f"API Error: {error_text}") # Логуємо для адміна
+                    
+                    await status_msg.edit_text(
+                        "<b>Сталася помилка при обробці файлу!</b>\n\n"
+                        "Схоже, що дані в файлі не відповідають введеним параметрам.\n"
+                        "1. Перевір, чи правильно вказані назви аркушів (вони мають бути ідентичні тим, що в Excel).\n"
+                        "2. Перевір, чи є дані у вказаних колонках та рядках.\n"
+                        "3. Спробуй завантажити файл ще раз через /start",
+                        parse_mode="HTML"
+                    )
+                    
     except Exception as e:
-        await status_msg.edit_text(f"Помилка: {str(e)}")
+        logging.error(f"Bot Exception: {str(e)}")
+        await status_msg.edit_text(
+            f"<b>Технічна помилка:</b> {str(e)}\n\n"
+            "Спробуй ще раз пізніше або звернись до адміністратора."
+        )
 
     await state.clear()
-    await message.answer("Готовий до нового файлу! Надішли ще один або /start")
+
 
 # ===  ЕНДПОІНТ ДЛЯ RENDER ===
 async def health(request):
@@ -275,9 +330,11 @@ async def start_web_server():
     app.router.add_get('/', health)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get('PORT', 10000)))
+    # Render надає порт через змінну оточення PORT
+    port = int(os.environ.get('PORT', 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print(f"Веб-сервер запущено на порту {os.environ.get('PORT', 10000)}")
+    print(f"Веб-сервер запущено на порту {port}")
 
 
 # === ГОЛОВНИЙ ЗАПУСК ===
@@ -291,3 +348,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

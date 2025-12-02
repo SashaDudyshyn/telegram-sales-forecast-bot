@@ -251,6 +251,7 @@ async def final_step(message: types.Message, state: FSMContext):
 
     await state.update_data(sheet_factor=message.text.strip())
 
+    # 1. Твій оригінальний текст
     status_msg = await message.answer("Всі параметри отримано!\nВідправляю на обробку... (до 40 сек)", reply_markup=ReplyKeyboardRemove())
 
     data = await state.get_data()
@@ -271,7 +272,7 @@ async def final_step(message: types.Message, state: FSMContext):
 
     try:
         connector = aiohttp.TCPConnector(ssl=False)
-        timeout = aiohttp.ClientTimeout(total=300)
+        timeout = aiohttp.ClientTimeout(total=120)
 
         async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
             form = aiohttp.FormData()
@@ -284,34 +285,27 @@ async def final_step(message: types.Message, state: FSMContext):
                 if resp.status == 200:
                     result = await resp.read()
                     await status_msg.delete()
+                    # Твій оригінальний текст успіху
                     await message.answer_document(
                         BufferedInputFile(result, filename=f"Прогноз_{filename}"),
                         caption="Готово! Ось твій файл з повним аналізом та прогнозом"
                     )
-                    await message.answer("Щоб завантажити новий файл, натисни /start")
                 else:
-                    # ТУТ ВАЖЛИВА ЗМІНА: Зрозуміле повідомлення про помилку
-                    error_text = await resp.text()
-                    logging.error(f"API Error: {error_text}") # Логуємо для адміна
-                    
-                    await status_msg.edit_text(
-                        "<b>Сталася помилка при обробці файлу!</b>\n\n"
-                        "Схоже, що дані в файлі не відповідають введеним параметрам.\n"
-                        "1. Перевір, чи правильно вказані назви аркушів (вони мають бути ідентичні тим, що в Excel).\n"
-                        "2. Перевір, чи є дані у вказаних колонках та рядках.\n"
-                        "3. Спробуй завантажити файл ще раз через /start",
-                        parse_mode="HTML"
-                    )
-                    
-    except Exception as e:
-        logging.error(f"Bot Exception: {str(e)}")
+                    raise Exception(f"Server Error {resp.status}")
+
+    except (asyncio.TimeoutError, Exception) as e:
+        print(f"Помилка обробки: {e}")
+        
         await status_msg.edit_text(
-            f"<b>Технічна помилка:</b> {str(e)}\n\n"
-            "Спробуй ще раз пізніше або звернись до адміністратора."
+            "Помилка обробки! Перевір свої дані і спробуй ще раз.\n\n"
+            "Можливі причини:\n"
+            "1. Неправильно вказані назви аркушів.\n"
+            "2. Вказано колонки, яких немає в файлі.\n"
+            "3. Невірний діапазон даних.\n\n"
+            "Натисни /start для нової спроби."
         )
 
     await state.clear()
-
 
 # ===  ЕНДПОІНТ ДЛЯ RENDER ===
 async def health(request):
